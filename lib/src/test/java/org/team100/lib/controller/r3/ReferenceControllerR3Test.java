@@ -4,7 +4,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -15,12 +14,12 @@ import org.team100.lib.geometry.HolonomicPose2d;
 import org.team100.lib.logging.LoggerFactory;
 import org.team100.lib.logging.TestLoggerFactory;
 import org.team100.lib.logging.primitive.TestPrimitiveLogger;
-import org.team100.lib.motion.swerve.Fixtured;
-import org.team100.lib.motion.swerve.kinodynamics.SwerveKinodynamics;
-import org.team100.lib.motion.swerve.kinodynamics.SwerveKinodynamicsFactory;
 import org.team100.lib.reference.r3.TrajectoryReferenceR3;
 import org.team100.lib.state.ModelR3;
-import org.team100.lib.subsystems.MockSubsystemR3;
+import org.team100.lib.subsystems.r3.MockSubsystemR3;
+import org.team100.lib.subsystems.r3.commands.helper.VelocityReferenceControllerR3;
+import org.team100.lib.subsystems.swerve.kinodynamics.SwerveKinodynamics;
+import org.team100.lib.subsystems.swerve.kinodynamics.SwerveKinodynamicsFactory;
 import org.team100.lib.testing.Timeless;
 import org.team100.lib.trajectory.Trajectory100;
 import org.team100.lib.trajectory.TrajectoryPlanner;
@@ -34,20 +33,18 @@ import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.geometry.Translation2d;
 
-public class ReferenceControllerR3Test extends Fixtured implements Timeless {
-    public ReferenceControllerR3Test() throws IOException {
-
-    }
-
+public class ReferenceControllerR3Test implements Timeless {
     private static final boolean DEBUG = false;
+
     private static final double DELTA = 0.001;
     private static final LoggerFactory logger = new TestLoggerFactory(new TestPrimitiveLogger());
-    SwerveKinodynamics swerveKinodynamics = SwerveKinodynamicsFactory.forRealisticTest();
-    List<TimingConstraint> constraints = new TimingConstraintFactory(swerveKinodynamics).allGood(logger);
-    TrajectoryPlanner planner = new TrajectoryPlanner(constraints);
 
     @Test
     void testTrajectoryStart() {
+        SwerveKinodynamics swerveKinodynamics = SwerveKinodynamicsFactory.forRealisticTest(logger);
+        List<TimingConstraint> constraints = new TimingConstraintFactory(swerveKinodynamics).allGood(logger);
+        TrajectoryPlanner planner = new TrajectoryPlanner(constraints);
+        // stepTime();
         Trajectory100 t = planner.restToRest(
                 new Pose2d(0, 0, Rotation2d.kZero),
                 new Pose2d(1, 0, Rotation2d.kZero));
@@ -58,9 +55,9 @@ public class ReferenceControllerR3Test extends Fixtured implements Timeless {
         // initially at rest
         MockSubsystemR3 drive = new MockSubsystemR3(new ModelR3());
 
-        TrajectoryReferenceR3 reference = new TrajectoryReferenceR3(t);
+        TrajectoryReferenceR3 reference = new TrajectoryReferenceR3(logger, t);
         VelocityReferenceControllerR3 c = new VelocityReferenceControllerR3(
-                drive, controller, reference);
+                logger, drive, controller, reference);
 
         stepTime();
         c.execute();
@@ -70,9 +67,9 @@ public class ReferenceControllerR3Test extends Fixtured implements Timeless {
         // and our current setpoint is equal to the measurement.
         stepTime();
         c.execute();
-        // assertEquals(0.098, drive.m_atRestSetpoint.x(), DELTA);
-        // assertEquals(0, drive.m_atRestSetpoint.y(), DELTA);
-        // assertEquals(0, drive.m_atRestSetpoint.theta(), DELTA);
+        // assertEquals(0.098, drive.m_setpoint.x(), DELTA);
+        // assertEquals(0, drive.m_setpoint.y(), DELTA);
+        // assertEquals(0, drive.m_setpoint.theta(), DELTA);
 
         stepTime();
         c.execute();
@@ -97,6 +94,11 @@ public class ReferenceControllerR3Test extends Fixtured implements Timeless {
 
     @Test
     void testTrajectoryDone() {
+        SwerveKinodynamics swerveKinodynamics = SwerveKinodynamicsFactory.forRealisticTest(logger);
+        List<TimingConstraint> constraints = new TimingConstraintFactory(swerveKinodynamics).allGood(logger);
+        TrajectoryPlanner planner = new TrajectoryPlanner(constraints);
+        stepTime();
+
         Trajectory100 t = planner.restToRest(
                 new Pose2d(0, 0, Rotation2d.kZero),
                 new Pose2d(1, 0, Rotation2d.kZero));
@@ -107,16 +109,18 @@ public class ReferenceControllerR3Test extends Fixtured implements Timeless {
         // initially at rest
         MockSubsystemR3 drive = new MockSubsystemR3(new ModelR3());
 
-        TrajectoryReferenceR3 reference = new TrajectoryReferenceR3(t);
+        TrajectoryReferenceR3 reference = new TrajectoryReferenceR3(logger, t);
         VelocityReferenceControllerR3 c = new VelocityReferenceControllerR3(
-                drive, controller, reference);
+                logger, drive, controller, reference);
 
         // the measurement never changes but that doesn't affect "done" as far as the
         // trajectory is concerned.
-        for (int i = 0; i < 100; ++i) {
+        for (int i = 0; i < 200; ++i) {
             stepTime();
             c.execute();
-            // we have magically reached the end
+            if (DEBUG)
+                System.out.printf("%s\n", drive.m_setpoint);
+            // we have magically reached the end (immediately)
             drive.m_state = new ModelR3(new Pose2d(1, 0, Rotation2d.kZero));
         }
         assertTrue(c.isDone());
@@ -157,12 +161,12 @@ public class ReferenceControllerR3Test extends Fixtured implements Timeless {
                 0.01, 0.02);
 
         MockSubsystemR3 drive = new MockSubsystemR3(new ModelR3());
-        TrajectoryReferenceR3 reference = new TrajectoryReferenceR3(trajectory);
+        TrajectoryReferenceR3 reference = new TrajectoryReferenceR3(logger, trajectory);
         VelocityReferenceControllerR3 referenceController = new VelocityReferenceControllerR3(
-                drive, swerveController, reference);
+                logger, drive, swerveController, reference);
 
-        Pose2d pose = trajectory.sample(0).state().getPose();
-        GlobalVelocityR3 velocity = GlobalVelocityR3.zero();
+        Pose2d pose = trajectory.sample(0).state().getPose().pose();
+        GlobalVelocityR3 velocity = GlobalVelocityR3.ZERO;
 
         double mDt = 0.02;
         int i = 0;

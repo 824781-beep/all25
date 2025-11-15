@@ -1,14 +1,14 @@
 package org.team100.frc2025.grip;
 
+import java.util.List;
+
 import org.team100.lib.config.Feedforward100;
 import org.team100.lib.config.Identity;
 import org.team100.lib.config.PIDConstants;
-import org.team100.lib.encoder.ctre.Talon6Encoder;
-import org.team100.lib.encoder.sim.SimulatedBareEncoder;
 import org.team100.lib.logging.Level;
 import org.team100.lib.logging.LoggerFactory;
 import org.team100.lib.logging.LoggerFactory.BooleanLogger;
-import org.team100.lib.motion.mechanism.LinearMechanism;
+import org.team100.lib.mechanism.LinearMechanism;
 import org.team100.lib.motor.BareMotor;
 import org.team100.lib.motor.MotorPhase;
 import org.team100.lib.motor.NeutralMode;
@@ -16,7 +16,8 @@ import org.team100.lib.motor.ctre.Kraken6Motor;
 import org.team100.lib.motor.sim.LazySimulatedBareMotor;
 import org.team100.lib.motor.sim.SimulatedBareMotor;
 import org.team100.lib.music.Music;
-import org.team100.lib.sensor.LaserCan100;
+import org.team100.lib.music.Player;
+import org.team100.lib.sensor.distance.LaserCan100;
 import org.team100.lib.util.CanId;
 
 import au.grapplerobotics.interfaces.LaserCanInterface.Measurement;
@@ -38,12 +39,14 @@ public class Manipulator extends SubsystemBase implements Music {
     private final LaserCan100 m_backLaser;
     private final LaserCan100 m_leftLaser;
 
-    public Manipulator(LoggerFactory parent) {
-        LoggerFactory log = parent.name("Manipulator");
+    private final List<Player> m_players;
 
-        LoggerFactory algaeMotorLog = log.name("Algae");
-        LoggerFactory leftMotorLog = log.name("leftMotor");
-        LoggerFactory rightMotorLog = log.name("rightMotor");
+    public Manipulator(LoggerFactory parent) {
+        LoggerFactory log = parent.type(this);
+
+        LoggerFactory algaeMotorLog = log.name("algae");
+        LoggerFactory leftMotorLog = log.name("left");
+        LoggerFactory rightMotorLog = log.name("right");
         coralLogger = log.booleanLogger(Level.TRACE, "Coral Detection");
         switch (Identity.instance) {
             case COMP_BOT -> {
@@ -72,28 +75,25 @@ public class Manipulator extends SubsystemBase implements Music {
                 m_frontLaser = new LaserCan100(new CanId(16));
                 m_backLaser = new LaserCan100(new CanId(18));
                 m_leftLaser = new LaserCan100(new CanId(15));
-                m_leftMech = new LinearMechanism(leftMotorLog, leftMotor, new Talon6Encoder(log, leftMotor),
+                m_leftMech = new LinearMechanism(leftMotorLog, leftMotor, leftMotor.encoder(),
                         16, 0.1, Double.NEGATIVE_INFINITY, Double.POSITIVE_INFINITY);
-                m_rightMech = new LinearMechanism(rightMotorLog, rightMotor, new Talon6Encoder(log, rightMotor),
+                m_rightMech = new LinearMechanism(rightMotorLog, rightMotor, rightMotor.encoder(),
                         16, 0.1, Double.NEGATIVE_INFINITY, Double.POSITIVE_INFINITY);
-                m_algaeMech = new LinearMechanism(algaeMotorLog, algaeMotor, new Talon6Encoder(log, algaeMotor),
+                m_algaeMech = new LinearMechanism(algaeMotorLog, algaeMotor, algaeMotor.encoder(),
                         16, 0.1, Double.NEGATIVE_INFINITY, Double.POSITIVE_INFINITY);
             }
             default -> {
-                BareMotor leftMotor = new SimulatedBareMotor(log, 600);
-                SimulatedBareEncoder leftEncoder = new SimulatedBareEncoder(log, leftMotor);
-                BareMotor rightMotor = new SimulatedBareMotor(log, 600);
-                SimulatedBareEncoder rightEncoder = new SimulatedBareEncoder(log, rightMotor);
+                SimulatedBareMotor leftMotor = new SimulatedBareMotor(log, 600);
+                SimulatedBareMotor rightMotor = new SimulatedBareMotor(log, 600);
                 // simulated algae motor gets overloaded 2 sec after starting
-                BareMotor algaeMotor = new LazySimulatedBareMotor(
-                        new SimulatedBareMotor(log, 600), 2);
-                SimulatedBareEncoder algaeEncoder = new SimulatedBareEncoder(log, algaeMotor);
+                LazySimulatedBareMotor algaeMotor = new LazySimulatedBareMotor(
+                        log, new SimulatedBareMotor(log, 600), 2);
                 m_algaeMotor = algaeMotor;
-                m_leftMech = new LinearMechanism(log, leftMotor, leftEncoder,
+                m_leftMech = new LinearMechanism(log, leftMotor, leftMotor.encoder(),
                         1, 1, Double.NEGATIVE_INFINITY, Double.POSITIVE_INFINITY);
-                m_rightMech = new LinearMechanism(log, rightMotor, rightEncoder,
+                m_rightMech = new LinearMechanism(log, rightMotor, rightMotor.encoder(),
                         1, 1, Double.NEGATIVE_INFINITY, Double.POSITIVE_INFINITY);
-                m_algaeMech = new LinearMechanism(log, algaeMotor, algaeEncoder,
+                m_algaeMech = new LinearMechanism(log, algaeMotor, algaeMotor.encoder(),
                         1, 1, Double.NEGATIVE_INFINITY, Double.POSITIVE_INFINITY);
                 m_rightLaser = new LaserCan100();
                 m_frontLaser = new LaserCan100();
@@ -101,6 +101,8 @@ public class Manipulator extends SubsystemBase implements Music {
                 m_leftLaser = new LaserCan100();
             }
         }
+        m_players = List.of(m_leftMech, m_rightMech, m_algaeMech);
+
     }
 
     @Override
@@ -110,6 +112,11 @@ public class Manipulator extends SubsystemBase implements Music {
             m_rightMech.play(freq);
             m_algaeMech.play(freq);
         });
+    }
+
+    @Override
+    public List<Player> players() {
+        return m_players;
     }
 
     /** Intake and hold. */

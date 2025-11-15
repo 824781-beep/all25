@@ -4,8 +4,8 @@ import static edu.wpi.first.wpilibj2.command.Commands.sequence;
 
 import org.team100.lib.coherence.Cache;
 import org.team100.lib.coherence.Takt;
-import org.team100.lib.commands.mecanum.ManualMecanum;
 import org.team100.lib.config.AnnotatedCommand;
+import org.team100.lib.experiments.Experiment;
 import org.team100.lib.experiments.Experiments;
 import org.team100.lib.framework.TimedRobot100;
 import org.team100.lib.geometry.GlobalVelocityR3;
@@ -14,17 +14,20 @@ import org.team100.lib.indicator.Alerts;
 import org.team100.lib.indicator.SolidIndicator;
 import org.team100.lib.logging.LoggerFactory;
 import org.team100.lib.logging.Logging;
-import org.team100.lib.motion.mecanum.MecanumDrive100;
-import org.team100.lib.motion.mecanum.MecanumDriveFactory;
-import org.team100.lib.motion.mecanum.MecanumKinematics100.Slip;
-import org.team100.lib.motion.swerve.kinodynamics.SwerveKinodynamics;
-import org.team100.lib.motion.swerve.kinodynamics.SwerveKinodynamicsFactory;
-import org.team100.lib.motion.swerve.kinodynamics.limiter.SwerveLimiter;
+import org.team100.lib.subsystems.mecanum.MecanumDrive100;
+import org.team100.lib.subsystems.mecanum.MecanumDriveFactory;
+import org.team100.lib.subsystems.mecanum.commands.ManualMecanum;
+import org.team100.lib.subsystems.mecanum.kinematics.MecanumKinematics100.Slip;
+import org.team100.lib.subsystems.swerve.kinodynamics.SwerveKinodynamics;
+import org.team100.lib.subsystems.swerve.kinodynamics.SwerveKinodynamicsFactory;
+import org.team100.lib.subsystems.swerve.kinodynamics.limiter.SwerveLimiter;
 import org.team100.lib.util.Banner;
 import org.team100.lib.util.CanId;
 import org.team100.lib.util.RoboRioChannel;
+import org.team100.lib.visualization.ArmVisualization;
 
 import edu.wpi.first.math.geometry.Pose2d;
+import edu.wpi.first.networktables.NetworkTableInstance;
 import edu.wpi.first.wpilibj.Alert;
 import edu.wpi.first.wpilibj.Alert.AlertType;
 import edu.wpi.first.wpilibj.DriverStation;
@@ -37,11 +40,12 @@ import edu.wpi.first.wpilibj2.command.CommandScheduler;
 import edu.wpi.first.wpilibj2.command.button.Trigger;
 
 public class Robot extends TimedRobot100 {
-    private static final double MAX_SPEED_X_M_S = 3.5;
+    private static final double MAX_SPEED_X_M_S = 5.0;
     private static final double MAX_SPEED_Y_M_S = 3.5;
     private static final double MAX_OMEGA_RAD_S = 5.0;
 
     private final MecanumDrive100 m_drive;
+    private final ArmVisualization m_pivotViz;
     private final Autons m_autons;
     private final SolidIndicator m_indicator;
     private final Alerts m_alerts;
@@ -62,10 +66,14 @@ public class Robot extends TimedRobot100 {
         LoggerFactory fieldLogger = logging.fieldLogger;
         DriverXboxControl driverControl = new DriverXboxControl(0);
         LoggerFactory logger = logging.rootLogger;
+        Pivot rotary = new Pivot(logger);
+        m_pivotViz = new ArmVisualization(rotary::getWrappedPositionRad, "pivot", 0);
+        rotary.setDefaultCommand(rotary.home());
+        new Trigger(driverControl::rightTrigger).whileTrue(rotary.extend()); // change to be triggers
         m_drive = MecanumDriveFactory.make(
                 fieldLogger,
                 logger,
-                25, // stator current limit (a)
+                65, // stator current limit (a)
                 new CanId(60), // gyro
                 new CanId(2), // front left
                 new CanId(1), // front right
@@ -73,10 +81,10 @@ public class Robot extends TimedRobot100 {
                 new CanId(4), // rear right
                 0.533, // track width (m)
                 0.406, // wheelbase (m)
-                new Slip(1, 1.4, 1), // wheel slip corrections
+                new Slip(1, 1.35, 1), // wheel slip corrections 1,1.4,1
                 6.0, // gears
                 0.15); // wheel dia (m)
-        SwerveKinodynamics kinodynamics = SwerveKinodynamicsFactory.mecanum();
+        SwerveKinodynamics kinodynamics = SwerveKinodynamicsFactory.mecanum(logger);
         SwerveLimiter limiter = new SwerveLimiter(
                 logger,
                 kinodynamics,
@@ -91,7 +99,7 @@ public class Robot extends TimedRobot100 {
                 m_drive);
         m_drive.setDefaultCommand(manual);
 
-        m_autons = new Autons(logger, fieldLogger, m_drive);
+        m_autons = new Autons(logger, fieldLogger, m_drive, rotary);
 
         new Trigger(driverControl::back).onTrue(
                 m_drive.resetPose());
@@ -105,7 +113,7 @@ public class Robot extends TimedRobot100 {
         new Trigger(driverControl::y).whileTrue(
                 sequence(
                         m_drive.driveWithGlobalVelocity(
-                                new GlobalVelocityR3(1.5, 0, 0))
+                                new GlobalVelocityR3(2, 0, 0))
                                 .withTimeout(1.0),
                         m_drive.driveWithGlobalVelocity(
                                 new GlobalVelocityR3(0, 1.5, 0))
@@ -117,11 +125,18 @@ public class Robot extends TimedRobot100 {
         Takt.update();
         Cache.refresh();
         CommandScheduler.getInstance().run();
+        m_pivotViz.run();
+        if (Experiments.instance.enabled(Experiment.FlushOften)) {
+            NetworkTableInstance.getDefault().flush();
+        }
     }
 
     @Override
     public void autonomousInit() {
-        Command auton = m_autons.get().command();
+        AnnotatedCommand cmd = m_autons.get();
+        if (cmd == null)
+            return;
+        Command auton = cmd.command();
         if (auton == null)
             return;
         auton.schedule();
@@ -140,6 +155,8 @@ public class Robot extends TimedRobot100 {
 
     private void checkStart() {
         AnnotatedCommand cmd = m_autons.get();
+        if (cmd == null)
+            return;
         Pose2d start = cmd.start();
         if (start == null) {
             m_noStartingPosition.set(true);
@@ -151,6 +168,8 @@ public class Robot extends TimedRobot100 {
 
     private void checkAlliance() {
         AnnotatedCommand cmd = m_autons.get();
+        if (cmd == null)
+            return;
         Alliance alliance = cmd.alliance();
         if (alliance == null) {
             // works for either
