@@ -117,7 +117,7 @@ public class Robot extends TimedRobot100 {
 
         m_autons = new Autons(logger, fieldLogger, m_drive, m_indexer, m_shooter);
 
-        new Trigger(driverControl::a).whileTrue(new Shoot(m_shooter, m_indexer, 7.5)); //////////////////////////////////////////
+        new Trigger(driverControl::a).whileTrue(new Shoot(m_shooter, m_indexer, 7.5));
         new Trigger(driverControl::b).whileTrue(new Shoot(m_shooter, m_indexer, 5));
         new Trigger(driverControl::x).whileTrue(new Shoot(m_shooter, m_indexer, 11));
         new Trigger(driverControl::y).whileTrue(m_indexer.run(() -> m_indexer.set(-1)));
